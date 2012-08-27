@@ -19,7 +19,7 @@
 // Space to reserve in f-segment for dynamic allocations
 #define CONFIG_MAX_BIOSTABLE 2048
 // Space to reserve in high-memory for tables
-#define CONFIG_MAX_HIGHTABLE (64*1024)
+#define CONFIG_MAX_HIGHTABLE (96*1024)
 // Largest supported externaly facing drive id
 #define CONFIG_MAX_EXTDRIVE 16
 // Number of bytes the smbios may be and still live in the f-segment

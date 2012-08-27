@@ -65,6 +65,17 @@ DefinitionBlock (
  ****************************************************************/
 
     Scope(\_SB) {
+
+        OperationRegion(SHPP, SystemIO, 0xae18, 0x04)
+        Field (SHPP, DWordAcc, NoLock, WriteAsZeros)
+        {
+            SHPC, 32,
+        }
+
+        Method (_INI, 0) {
+            Store (0x00, SHPC)
+        } 
+
         Device(PCI0) {
             Name (_HID, EisaId ("PNP0A03"))
             Name (_ADR, 0x00)
@@ -130,6 +141,18 @@ DefinitionBlock (
             Field (SEJ, DWordAcc, NoLock, WriteAsZeros)
             {
                 B0EJ, 32,
+            }
+
+            OperationRegion(WALK, SystemIO, 0xae10, 0x04)
+            Field (WALK, DWordAcc, NoLock, WriteAsZeros)
+            {
+                PCIW, 32,
+            }
+
+            OperationRegion(WALS, SystemIO, 0xae14, 0x04)
+            Field (WALS, DWordAcc, NoLock, WriteAsZeros)
+            {
+                PCIS, 32,
             }
 
             Name (CRES, ResourceTemplate ()
@@ -534,9 +557,11 @@ DefinitionBlock (
         /* Methods called by bulk generated PCI devices below */
 
         /* Methods called by hotplug devices */
-        Method (PCEJ, 1, NotSerialized) {
+        Method (PCEJ, 2, NotSerialized) {
             // _EJ0 method - eject callback
-            Store(ShiftLeft(1, Arg0), B0EJ)
+            Store (Zero, Local0)
+            Or(ShiftLeft(Arg0, 8), Arg1, Local0)
+            Store(Local0, B0EJ)
             Return (0x0)
         }
 
@@ -547,13 +572,29 @@ DefinitionBlock (
         Method(PCNF, 0) {
             // Local0 = iterator
             Store (Zero, Local0)
-            While (LLess(Local0, 31)) {
-                Increment(Local0)
-                If (And(PCIU, ShiftLeft(1, Local0))) {
-                    PCNT(Local0, 1)
+            Store (Zero, Local1)
+            Store (Zero, PCIW)
+            Store (PCIS, Local1)
+
+            if (LEqual(Local1, Zero)) {
+                While (LLess(Local0, 31)) {
+                    Increment(Local0)
+                    If (And(PCIU, ShiftLeft(1, Local0))) {
+                        PCNT(Local0, Local1, 1)
+                    }
+                    If (And(PCID, ShiftLeft(1, Local0))) {
+                        PCNT(Local0, Local1, 3)
+                    }
                 }
-                If (And(PCID, ShiftLeft(1, Local0))) {
-                    PCNT(Local0, 3)
+            } Else {
+                While (LLess(Local0, 31)) {
+                    Increment(Local0)
+                    If (And(PCIU, ShiftLeft(1, Local0))) {
+                        PCNT(Local1, Local0, 1)
+                    }
+                    If (And(PCID, ShiftLeft(1, Local0))) {
+                        PCNT(Local1, Local0, 3)
+                    }
                 }
             }
             Return(One)

@@ -37,5 +37,6 @@ for line in fileinput.input():
         if (i % 2):
             sys.stdout.write("\n/* %s */\n" % s[i])
         else:
+            s[i] = re.sub('}','}\n',s[i])
             sys.stdout.write(s[i])
 
