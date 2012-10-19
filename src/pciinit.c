@@ -12,6 +12,7 @@
 #include "ioport.h" // PORT_ATA1_CMD_BASE
 #include "config.h" // CONFIG_*
 #include "xen.h" // usingXen
+#include "dev-q35.h" // usingXen
 
 #define PCI_DEVICE_MEM_MIN     0x1000
 #define PCI_BRIDGE_IO_MIN      0x1000
@@ -121,12 +122,44 @@ static void piix_isa_bridge_init(struct pci_device *pci, void *arg)
     dprintf(1, "PIIX3/PIIX4 init: elcr=%02x %02x\n", elcr[0], elcr[1]);
 }
 
+/* ICH9 LPC PCI to ISA bridge */
+/* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_LPC */
+void mch_isa_bridge_init(struct pci_device *dev, void *arg)
+{
+    u16 bdf = dev->bdf;
+    int i, irq;
+    u8 elcr[2];
+
+    elcr[0] = 0x00;
+    elcr[1] = 0x00;
+
+    for (i = 0; i < 4; i++) {
+        irq = pci_irqs[i];
+        /* set to trigger level */
+        elcr[irq >> 3] |= (1 << (irq & 7));
+
+        /* activate irq remapping in LPC */
+
+        /* PIRQ[A-D] routing */
+        pci_config_writeb(bdf, ICH9_LPC_PIRQA_ROUT + i,
+                          irq | ICH9_LPC_PIRQ_ROUT_IRQEN);
+        /* PIRQ[E-H] routing */
+        pci_config_writeb(bdf, ICH9_LPC_PIRQE_ROUT + i,
+                          irq | ICH9_LPC_PIRQ_ROUT_IRQEN);
+    }
+    outb(elcr[0], ICH9_LPC_PORT_ELCR1);
+    outb(elcr[1], ICH9_LPC_PORT_ELCR2);
+    dprintf(1, "Q35 LPC init: elcr=%02x %02x\n", elcr[0], elcr[1]);
+}
+
 static const struct pci_device_id pci_isa_bridge_tbl[] = {
     /* PIIX3/PIIX4 PCI to ISA bridge */
     PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371SB_0,
                piix_isa_bridge_init),
     PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_0,
                piix_isa_bridge_init),
+    PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH9_LPC,
+               mch_isa_bridge_init),
 
     PCI_DEVICE_END
 };
@@ -200,11 +233,40 @@ static void piix4_pm_init(struct pci_device *pci, void *arg)
     pmtimer_init(PORT_ACPI_PM_BASE + 0x08, PM_TIMER_FREQUENCY / 1000);
 }
 
+/* ICH9 LPC Power Management device (for ACPI) */
+/* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_LPC */
+void ich9_lpc_pm_init(struct pci_device *dev, void *arg)
+{
+    u16 bdf = dev->bdf;
+    /* pm io base */
+    pci_config_writel(bdf, ICH9_LPC_PMBASE,
+                      PORT_ACPI_PM_BASE | ICH9_LPC_PMBASE_RTE);
+
+    /* acpi enable, SCI: IRQ9 000b = irq9*/
+    pci_config_writeb(bdf, ICH9_LPC_ACPI_CTRL, ICH9_LPC_ACPI_CTRL_ACPI_EN);
+}
+
+/* ICH9 SMBUS */
+/* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_SMBUS */
+void ich9_smbus_init(struct pci_device *dev, void *arg)
+{
+    u16 bdf = dev->bdf;
+    /* map smbus into io space */
+    pci_config_writel(bdf, ICH9_SMB_SMB_BASE,
+                      PORT_SMB_BASE | PCI_BASE_ADDRESS_SPACE_IO);
+
+    /* enable SMBus */
+    pci_config_writeb(bdf, ICH9_SMB_HOSTC, ICH9_SMB_HOSTC_HST_EN);
+}
+
 static const struct pci_device_id pci_device_tbl[] = {
     /* PIIX4 Power Management device (for ACPI) */
     PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_3,
                piix4_pm_init),
-
+    PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH9_LPC,
+               ich9_lpc_pm_init),
+    PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH9_SMBUS,
+               ich9_smbus_init),
     PCI_DEVICE_END,
 };
 
@@ -598,9 +660,27 @@ static void pci_region_map_entries(struct pci_bus *busses, struct pci_region *r)
     }
 }
 
+void mch_mem_addr_init(struct pci_device *dev, void *arg)
+{
+    u64 *start = (u64 *)arg; 
+    /* mmconfig space */
+    *start = Q35_HOST_BRIDGE_PCIEXBAR_ADDR +
+                Q35_HOST_BRIDGE_PCIEXBAR_SIZE;
+    mtrr_base = *start;
+}
+
+static const struct pci_device_id pci_mem_addr_tbl[] = {
+    PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_Q35_MCH,
+               mch_mem_addr_init),
+    PCI_DEVICE_END,
+};
+
 static void pci_bios_map_devices(struct pci_bus *busses)
 {
     pcimem_start = RamSize;
+
+    /* let's add in mmconfig space on q35 */
+    pci_find_init_device(pci_mem_addr_tbl, &pcimem_start);
 
     if (pci_bios_init_root_regions(busses)) {
         struct pci_region r64_mem, r64_pref;
