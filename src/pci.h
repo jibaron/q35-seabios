@@ -56,6 +56,7 @@ struct pci_device {
     // Local information on device.
     int have_driver;
 };
+extern u64 mtrr_base;
 extern u64 pcimem_start, pcimem_end;
 extern u64 pcimem64_start, pcimem64_end;
 extern struct pci_device *PCIDevices;
