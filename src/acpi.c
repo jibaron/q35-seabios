@@ -13,6 +13,7 @@
 #include "pci_regs.h" // PCI_INTERRUPT_LINE
 #include "ioport.h" // inl
 #include "paravirt.h" // qemu_cfg_irq0_override
+#include "memmap.h"
 
 /****************************************************/
 /* ACPI tables init */
@@ -734,6 +735,76 @@ build_srat(void)
     return srat;
 }
 
+struct acpi_mcfg {
+    u32 nr;
+    struct acpi_table_mcfg *mcfg;
+    struct e820entry *e820;
+};
+
+static const struct pci_device_id mcfg_find_tbl[] = {
+    PCI_DEVICE_END,
+};
+
+static const struct pci_device_id mcfg_init_tbl[] = {
+    PCI_DEVICE_END,
+};
+
+static void *
+build_mcfg(void)
+{
+    struct pci_device *dev;
+    int bdf;
+
+    struct acpi_mcfg acpi_mcfg = {
+        .nr = 0,
+        .mcfg = NULL,
+        .e820 = NULL,
+    };
+    dev = pci_find_init_device(mcfg_find_tbl, &acpi_mcfg);
+    bdf = dev->bdf;
+    if (bdf < 0) {
+        return NULL;
+    }
+    if (acpi_mcfg.nr == 0) {
+        return NULL;
+    }
+
+    struct acpi_table_mcfg *mcfg;
+    int len = sizeof(*mcfg) + acpi_mcfg.nr * sizeof(mcfg->allocation[0]);
+    mcfg = malloc_high(len);
+    if (!mcfg) {
+        dprintf(1, "Not enough memory for mcfg table!\n");
+        return NULL;
+    }
+    memset(mcfg, 0, len);
+    acpi_mcfg.mcfg = mcfg;
+
+
+    struct e820entry *e820;
+    int e820_len = acpi_mcfg.nr * sizeof(*e820);
+    e820 = malloc_tmphigh(e820_len);
+    if (!e820) {
+        dprintf(1, "Not enough memory for e820 table!\n");
+        free(mcfg);
+        return NULL;
+    }
+    memset(e820, 0, e820_len);
+    acpi_mcfg.e820 = e820;
+
+    pci_init_device(mcfg_init_tbl, dev, &acpi_mcfg);
+
+    /* Linux checks if e820 covers mcfg area as reserved.
+     * If no, Linux thinks bios is buggy and won't use MCFG */
+    int i;
+    for (i = 0; i < acpi_mcfg.nr; i++) {
+        add_e820(e820[i].start, e820[i].size, E820_RESERVED);
+    }
+    free(e820);
+
+    build_header((void *)mcfg, MCFG_SIGNATURE, len, 1);
+    return mcfg;
+}
+
 static const struct pci_device_id acpi_find_tbl[] = {
     /* PIIX4 Power Management device. */
     PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_3, NULL),
@@ -774,6 +845,7 @@ acpi_bios_init(void)
     ACPI_INIT_TABLE(build_madt());
     ACPI_INIT_TABLE(build_hpet());
     ACPI_INIT_TABLE(build_srat());
+    ACPI_INIT_TABLE(build_mcfg());
 
     u16 i, external_tables = qemu_cfg_acpi_additional_tables();
 
