@@ -83,6 +83,21 @@ DefinitionBlock (
             Name (_ADR, 0x00)
             Name (_UID, 1)
 
+
+            OperationRegion(PCST, SystemIO, 0xae00, 0x08)
+            Field (PCST, DWordAcc, NoLock, WriteAsZeros)
+            {
+                PCIU, 32,
+                PCID, 32,
+            }
+
+            OperationRegion(SEJ, SystemIO, 0xae08, 0x04)
+            Field (SEJ, DWordAcc, NoLock, WriteAsZeros)
+            {
+                B0EJ, 32,
+            }
+
+
             // _OSC: based on sample of ACPI3.0b spec
             Name(SUPP,0) // PCI _OSC Support Field value
             Name(CTRL,0) // PCI _OSC Control Field value
@@ -872,6 +887,41 @@ DefinitionBlock (
         }
     }
 
+/****************************************************************
+ * PCI hotplug
+ ****************************************************************/
+
+    Scope(\_SB.PCI0) {
+        /* Methods called by bulk generated PCI devices below */
+
+        /* Methods called by hotplug devices */
+        Method (PCEJ, 1, NotSerialized) {
+            // _EJ0 method - eject callback
+            Store(ShiftLeft(1, Arg0), B0EJ)
+            Return (0x0)
+        }
+
+    /* Hotplug notification method supplied by SSDT */
+    External (\_SB.PCI0.PCNT, MethodObj)
+
+        /* PCI hotplug notify method */
+        Method(PCNF, 0) {
+            // Local0 = iterator
+            Store (Zero, Local0)
+            While (LLess(Local0, 31)) {
+                Increment(Local0)
+                If (And(PCIU, ShiftLeft(1, Local0))) {
+                    PCNT(Local0, 1)
+                }
+                If (And(PCID, ShiftLeft(1, Local0))) {
+                    PCNT(Local0, 3)
+                }
+            }
+            Return(One)
+        }
+
+    }
+
     Scope (\_GPE)
     {
         Name(_HID, "ACPI0006")
@@ -879,12 +929,13 @@ DefinitionBlock (
         Method(_L00) {
             Return(0x01)
         }
-        Method(_L01) {
-             // CPU hotplug event
-	     Return(\_SB.PRSC())
+        Method(_E01) {
+            // PCI hotplug event
+            Return(\_SB.PCI0.PCNF())
         }
-        Method(_L02) {
-            Return(0x01)
+        Method(_E02) {
+            // CPU hotplug event
+            Return(\_SB.PRSC())
         }
         Method(_L03) {
             Return(0x01)
